@@ -1,6 +1,7 @@
 package solusvm
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"encoding/xml"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type vminfo struct {
@@ -135,6 +137,8 @@ type VirtualMachine struct {
 	key  string
 	hash string
 	host string
+
+	client *http.Client
 }
 
 //NewVM create a virtual machine object's pointer
@@ -144,6 +148,28 @@ func NewVM(host, key, hash string) *VirtualMachine {
 		key:  key,
 		hash: hash,
 	}
+}
+
+//Init http client
+func (vm *VirtualMachine) InitHTTPClient() bool {
+	if nil == vm.client {
+		client := &http.Client{
+			Transport: http.DefaultTransport,
+			Timeout:   15 * time.Second,
+		}
+
+		if ts, ok := client.Transport.(*http.Transport); ok {
+			ts.TLSClientConfig = &tls.Config{
+				InsecureSkipVerify: true,
+			}
+		}
+
+		vm.client = client
+
+		return true
+	}
+
+	return false
 }
 
 //Boot virtual machine
@@ -255,6 +281,19 @@ func do(vm *VirtualMachine, action string, flags ...string) ([]byte, error) {
 	val.Add("hash", vm.hash)
 	for _, v := range flags {
 		val.Add(v, "true")
+	}
+	if nil != vm.client {
+		resp, err := vm.client.PostForm(vm.host, val)
+		if err != nil {
+			return []byte{}, err
+		}
+		defer resp.Body.Close()
+		var msg []byte
+		msg, err = ioutil.ReadAll(resp.Body)
+		if err != nil {
+			return []byte{}, err
+		}
+		return []byte("<vminfo>" + string(msg) + "</vminfo>"), nil
 	}
 	resp, err := http.PostForm(vm.host, val)
 	if err != nil {
